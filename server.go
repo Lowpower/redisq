@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Lowpower/redisq/internal/base"
 	"github.com/Lowpower/redisq/internal/log"
 )
 
@@ -26,10 +27,13 @@ import (
 // oldest tasks in the archive will be deleted.
 type Server struct {
 	logger *log.Logger
+	broker base.Broker
 	state  *serverState
 
 	// wait group to wait for all goroutines to finish.
-	wg sync.WaitGroup
+	wg        sync.WaitGroup
+	forwarder *forwarder
+	processor *processor
 }
 
 type serverStateValue int
@@ -325,4 +329,20 @@ func (l *LogLevel) Set(val string) error {
 		return fmt.Errorf("redisq: unsupported log level %q", val)
 	}
 	return nil
+}
+
+// A Handler processes tasks.
+//
+// ProcessTask should return nil if the processing of a task
+// is successful.
+//
+// If ProcessTask returns a non-nil error or panics, the task
+// will be retried after delay if retry-count is remaining,
+// otherwise the task will be archived.
+//
+// One exception to this rule is when ProcessTask returns a SkipRetry error.
+// If the returned error is SkipRetry or an error wraps SkipRetry, retry is
+// skipped and the task will be immediately archived instead.
+type Handler interface {
+	ProcessTask(context.Context, *Task) error
 }

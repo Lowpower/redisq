@@ -9,12 +9,14 @@ import (
 
 	"github.com/Lowpower/redisq/internal/base"
 	"github.com/Lowpower/redisq/internal/log"
+	"github.com/Lowpower/redisq/internal/timeutil"
 	"golang.org/x/time/rate"
 )
 
 type processor struct {
 	logger *log.Logger
 	broker base.Broker
+	clock  timeutil.Clock
 
 	handler   Handler
 	baseCtxFn func() context.Context
@@ -86,6 +88,55 @@ func newProcessor(params processorParams) *processor {
 		starting:        params.starting,
 		finished:        params.finished,
 	}
+}
+
+// Note: stops only the "processor" goroutine, does not stop workers.
+// It's safe to call this method multiple times.
+func (p *processor) stop() {
+	p.once.Do(func() {
+		p.logger.Debug("Processor shutting down...")
+		// Unblock if processor is waiting for sema token.
+		close(p.quit)
+		// Signal the processor goroutine to stop processing tasks
+		// from the queue.
+		p.done <- struct{}{}
+	})
+}
+
+// NOTE: once shutdown, processor cannot be re-started.
+func (p *processor) shutdown() {
+	p.stop()
+
+	time.AfterFunc(p.shutdownTimeout, func() { close(p.abort) })
+
+	p.logger.Info("Waiting for all workers to finish...")
+	// block until all workers have released the token
+	for i := 0; i < cap(p.sema); i++ {
+		p.sema <- struct{}{}
+	}
+	p.logger.Info("All workers have finished")
+}
+
+func (p *processor) start(wg *sync.WaitGroup) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-p.done:
+				p.logger.Debug("Processor done")
+				return
+			default:
+				p.exec()
+			}
+		}
+	}()
+}
+
+// exec pulls a task out of the queue and starts a worker goroutine to
+// process the task.
+func (p *processor) exec() {
+
 }
 
 // A workerInfo holds an active worker information.

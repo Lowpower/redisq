@@ -5,6 +5,7 @@ package base
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -141,6 +142,43 @@ type TaskMessage struct {
 	//
 	// Use zero to indicate no value.
 	CompletedAt int64
+}
+
+// Cancelations is a collection that holds cancel functions for all active tasks.
+//
+// Cancelations are safe for concurrent use by multiple goroutines.
+type Cancelations struct {
+	mu          sync.Mutex
+	cancelFuncs map[string]context.CancelFunc
+}
+
+// NewCancelations returns a Cancelations instance.
+func NewCancelations() *Cancelations {
+	return &Cancelations{
+		cancelFuncs: make(map[string]context.CancelFunc),
+	}
+}
+
+// Add adds a new cancel func to the collection.
+func (c *Cancelations) Add(id string, fn context.CancelFunc) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cancelFuncs[id] = fn
+}
+
+// Delete deletes a cancel func from the collection given an id.
+func (c *Cancelations) Delete(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.cancelFuncs, id)
+}
+
+// Get returns a cancel func given an id.
+func (c *Cancelations) Get(id string) (fn context.CancelFunc, ok bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	fn, ok = c.cancelFuncs[id]
+	return fn, ok
 }
 
 // Broker is a message broker that supports operations to manage task queues.

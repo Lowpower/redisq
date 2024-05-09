@@ -33,6 +33,9 @@ type processor struct {
 
 	shutdownTimeout time.Duration
 
+	// channel via which to send sync requests to syncer.
+	syncRequestCh chan<- *syncRequest
+
 	// rate limiter to prevent spamming logs with a bunch of errors.
 	errLogLimiter *rate.Limiter
 
@@ -51,6 +54,9 @@ type processor struct {
 	// abort channel communicates to the in-flight worker goroutines to stop.
 	abort chan struct{}
 
+	// cancelations is a set of cancel functions for all active tasks.
+	cancelations *base.Cancelations
+
 	starting chan<- *workerInfo
 	finished chan<- *base.TaskMessage
 }
@@ -61,6 +67,8 @@ type processorParams struct {
 	baseCtxFn       func() context.Context
 	retryDelayFunc  RetryDelayFunc
 	isFailureFunc   func(error) bool
+	syncCh          chan<- *syncRequest
+	cancelations    *base.Cancelations
 	concurrency     int
 	queues          map[string]int
 	strictPriority  bool
